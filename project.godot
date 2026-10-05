@@ -1,0 +1,17 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; but can be edited if you know what you're doing.
+
+config_version=5
+
+[application]
+
+config/name="TFC Conc Platformer"
+run/main_scene="res://scenes/main_course.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+
+[physics]
+
+common/physics_ticks_per_second=66
+common/max_physics_steps_per_frame=8
+3d/default_gravity=24.0
