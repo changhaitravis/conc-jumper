@@ -36,10 +36,14 @@ func _physics_process(delta: float) -> void:
 func throw_grenade(direction: Vector3, throw_speed: float) -> void:
 	is_held = false
 	freeze = false
-	linear_velocity = (direction * throw_speed) + (player_ref.velocity * 0.5)
+	var inherit := Vector3.ZERO
+	if player_ref and is_instance_valid(player_ref):
+		inherit = player_ref.velocity * 0.5
+	linear_velocity = (direction * throw_speed) + inherit
 
 func detonate() -> void:
 	if player_ref and is_instance_valid(player_ref):
 		player_ref.apply_explosion_impulse(global_position, blast_force, blast_radius, upward_bias)
-	
+		player_ref.clear_primed_conc()
+
 	queue_free()

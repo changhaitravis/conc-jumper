@@ -9,6 +9,7 @@ extends CharacterBody3D
 @export var air_accel: float = 50.0
 @export var jump_impulse: float = 9.0
 @export var gravity: float = 24.0
+@export var crouch_speed_multiplier: float = 0.45
 
 @export_group("Camera")
 @export var mouse_sensitivity: float = 0.002
@@ -18,6 +19,10 @@ extends CharacterBody3D
 @export var conc_scene: PackedScene
 @export var rocket_scene: PackedScene
 @export var max_concs: int = 4
+@export var conc_throw_speed: float = 22.0
+
+const HEAD_STAND_HEIGHT := 1.5
+const HEAD_CROUCH_HEIGHT := 1.0
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
@@ -35,7 +40,20 @@ func _ready() -> void:
 	conc_inventory = max_concs
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event.is_action_pressed("ui_cancel"):
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
+
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		# Click to re-capture the mouse instead of firing while uncaptured.
+		if event.is_action_pressed("fire_rocket"):
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
+
+	if event is InputEventMouseMotion:
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		head.rotate_x(-event.relative.y * mouse_sensitivity)
 		head.rotation.x = clamp(head.rotation.x, deg_to_rad(-max_pitch), deg_to_rad(max_pitch))
@@ -55,8 +73,12 @@ func _physics_process(delta: float) -> void:
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var wish_dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 
+	is_crouching = Input.is_action_pressed("crouch") and is_on_floor()
+	head.position.y = HEAD_CROUCH_HEIGHT if is_crouching else HEAD_STAND_HEIGHT
+	var max_speed := max_ground_speed * (crouch_speed_multiplier if is_crouching else 1.0)
+
 	if is_on_floor():
-		_handle_ground_physics(delta, wish_dir)
+		_handle_ground_physics(delta, wish_dir, max_speed)
 		if Input.is_action_pressed("jump"):
 			velocity.y = jump_impulse
 	else:
@@ -64,16 +86,16 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
-func _handle_ground_physics(delta: float, wish_dir: Vector3) -> void:
+func _handle_ground_physics(delta: float, wish_dir: Vector3, max_speed: float) -> void:
 	var speed := velocity.length()
 	if speed != 0.0:
 		var drop := speed * ground_friction * delta
 		velocity *= max(speed - drop, 0.0) / speed
 
 	var cur_speed := velocity.dot(wish_dir)
-	var add_speed := max_ground_speed - cur_speed
+	var add_speed := max_speed - cur_speed
 	if add_speed > 0.0:
-		var accel_speed := ground_accel * max_ground_speed * delta
+		var accel_speed := ground_accel * max_speed * delta
 		accel_speed = min(accel_speed, add_speed)
 		velocity += wish_dir * accel_speed
 
@@ -106,6 +128,8 @@ func apply_explosion_impulse(explosion_pos: Vector3, max_force: float, radius: f
 	velocity += final_impulse
 
 func start_prime_conc() -> void:
+	if conc_scene == null:
+		return
 	if conc_inventory <= 0 or active_primed_conc != null:
 		return
 	conc_inventory -= 1
@@ -114,10 +138,13 @@ func start_prime_conc() -> void:
 	conc.init_primed(self)
 	active_primed_conc = conc
 
+func clear_primed_conc() -> void:
+	active_primed_conc = null
+
 func release_conc() -> void:
 	if active_primed_conc != null and is_instance_valid(active_primed_conc):
 		var throw_direction := -camera.global_transform.basis.z
-		active_primed_conc.throw_grenade(throw_direction, 22.0)
+		active_primed_conc.throw_grenade(throw_direction, conc_throw_speed)
 		active_primed_conc = null
 
 func fire_rocket() -> void:
@@ -132,3 +159,4 @@ func respawn_at_checkpoint() -> void:
 	global_transform = spawn_checkpoint_transform
 	velocity = Vector3.ZERO
 	conc_inventory = max_concs
+	is_crouching = false

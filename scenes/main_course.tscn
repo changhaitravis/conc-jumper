@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3 uid="uid://main_course_01"]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1_player"]
 [ext_resource type="PackedScene" path="res://scenes/checkpoint.tscn" id="2_cp"]
