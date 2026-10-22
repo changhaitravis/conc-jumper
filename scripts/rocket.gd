@@ -15,7 +15,7 @@ func launch(launch_dir: Vector3, player: Player) -> void:
 	direction = launch_dir.normalized()
 	shooter = player
 	if player:
-		add_collision_exception_with_body(player)
+		add_collision_exception_with(player)
 
 func _physics_process(delta: float) -> void:
 	_age += delta

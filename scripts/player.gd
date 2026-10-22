@@ -122,8 +122,8 @@ func apply_explosion_impulse(explosion_pos: Vector3, max_force: float, radius: f
 	dir.y += upward_bias
 	dir = dir.normalized()
 
-	var falloff := 1.0 - clamp(distance / radius, 0.0, 1.0)
-	var final_impulse := dir * max_force * falloff
+	var falloff: float = 1.0 - clampf(distance / radius, 0.0, 1.0)
+	var final_impulse: Vector3 = dir * max_force * falloff
 
 	velocity += final_impulse
 
