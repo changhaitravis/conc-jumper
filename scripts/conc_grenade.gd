@@ -11,6 +11,7 @@ var is_held: bool = true
 var player_ref: Player = null
 
 @onready var timer_label: Label3D = $TimerLabel
+@onready var collision_shape: CollisionShape3D = $CollisionShape3D
 
 func _ready() -> void:
 	freeze = true
@@ -21,13 +22,17 @@ func init_primed(player: Player) -> void:
 	is_held = true
 	freeze = true
 	top_level = true
+	if collision_shape:
+		collision_shape.disabled = true
+	if player_ref:
+		add_collision_exception_with(player_ref)
 
 func _physics_process(delta: float) -> void:
 	time_remaining -= delta
 	if timer_label:
 		timer_label.text = "%.1f" % max(time_remaining, 0.0)
 
-	if is_held and player_ref:
+	if is_held and player_ref and is_instance_valid(player_ref):
 		global_position = player_ref.projectile_spawn.global_position
 
 	if time_remaining <= 0.0:
@@ -36,6 +41,8 @@ func _physics_process(delta: float) -> void:
 func throw_grenade(direction: Vector3, throw_speed: float) -> void:
 	is_held = false
 	freeze = false
+	if collision_shape:
+		collision_shape.disabled = false
 	var inherit := Vector3.ZERO
 	if player_ref and is_instance_valid(player_ref):
 		inherit = player_ref.velocity * 0.5
@@ -43,7 +50,8 @@ func throw_grenade(direction: Vector3, throw_speed: float) -> void:
 
 func detonate() -> void:
 	if player_ref and is_instance_valid(player_ref):
-		player_ref.apply_explosion_impulse(global_position, blast_force, blast_radius, upward_bias)
-		player_ref.clear_primed_conc()
+		var blast_origin := player_ref.global_position if is_held else global_position
+		player_ref.apply_explosion_impulse(blast_origin, blast_force, blast_radius, upward_bias)
+		player_ref.clear_primed_conc(self)
 
 	queue_free()

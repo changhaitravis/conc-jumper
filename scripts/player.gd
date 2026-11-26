@@ -21,9 +21,12 @@ extends CharacterBody3D
 @export var max_concs: int = 4
 @export var conc_throw_speed: float = 22.0
 
+const STAND_HEIGHT := 1.8
+const CROUCH_HEIGHT := 1.1
 const HEAD_STAND_HEIGHT := 1.5
-const HEAD_CROUCH_HEIGHT := 1.0
+const HEAD_CROUCH_HEIGHT := 0.9
 
+@onready var collision_shape: CollisionShape3D = $CollisionShape3D
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
 @onready var weapon_holder: Node3D = $Head/Camera3D/WeaponHolder
@@ -42,6 +45,7 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			release_conc()
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -73,42 +77,54 @@ func _physics_process(delta: float) -> void:
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var wish_dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 
-	is_crouching = Input.is_action_pressed("crouch") and is_on_floor()
-	head.position.y = HEAD_CROUCH_HEIGHT if is_crouching else HEAD_STAND_HEIGHT
+	var wants_crouch := Input.is_action_pressed("crouch")
+	if wants_crouch:
+		is_crouching = true
+	elif is_crouching and not test_move(global_transform, Vector3(0, STAND_HEIGHT - CROUCH_HEIGHT, 0)):
+		is_crouching = false
+	_apply_crouch_dimensions()
+
 	var max_speed := max_ground_speed * (crouch_speed_multiplier if is_crouching else 1.0)
 
 	if is_on_floor():
-		_handle_ground_physics(delta, wish_dir, max_speed)
 		if Input.is_action_pressed("jump"):
 			velocity.y = jump_impulse
+			_accelerate(delta, wish_dir, air_max_speed, air_accel)
+		else:
+			_handle_ground_physics(delta, wish_dir, max_speed)
 	else:
-		_handle_air_physics(delta, wish_dir)
+		velocity.y -= gravity * delta
+		_accelerate(delta, wish_dir, air_max_speed, air_accel)
 
 	move_and_slide()
 
-func _handle_ground_physics(delta: float, wish_dir: Vector3, max_speed: float) -> void:
-	var speed := velocity.length()
-	if speed != 0.0:
-		var drop := speed * ground_friction * delta
-		velocity *= max(speed - drop, 0.0) / speed
+func _apply_crouch_dimensions() -> void:
+	head.position.y = HEAD_CROUCH_HEIGHT if is_crouching else HEAD_STAND_HEIGHT
+	var target_height := CROUCH_HEIGHT if is_crouching else STAND_HEIGHT
+	var capsule := collision_shape.shape as CapsuleShape3D
+	if capsule and not is_equal_approx(capsule.height, target_height):
+		capsule.height = target_height
+		collision_shape.position.y = target_height * 0.5
 
+func _handle_ground_physics(delta: float, wish_dir: Vector3, max_speed: float) -> void:
+	var horiz := Vector3(velocity.x, 0.0, velocity.z)
+	var speed := horiz.length()
+	if speed > 0.0:
+		var drop := speed * ground_friction * delta
+		var scale := maxf(speed - drop, 0.0) / speed
+		velocity.x *= scale
+		velocity.z *= scale
+
+	_accelerate(delta, wish_dir, max_speed, ground_accel)
+
+func _accelerate(delta: float, wish_dir: Vector3, max_speed: float, accel: float) -> void:
+	if wish_dir == Vector3.ZERO:
+		return
 	var cur_speed := velocity.dot(wish_dir)
 	var add_speed := max_speed - cur_speed
 	if add_speed > 0.0:
-		var accel_speed := ground_accel * max_speed * delta
-		accel_speed = min(accel_speed, add_speed)
+		var accel_speed := minf(accel * max_speed * delta, add_speed)
 		velocity += wish_dir * accel_speed
-
-func _handle_air_physics(delta: float, wish_dir: Vector3) -> void:
-	velocity.y -= gravity * delta
-
-	if wish_dir != Vector3.ZERO:
-		var cur_speed := velocity.dot(wish_dir)
-		var add_speed := air_max_speed - cur_speed
-		if add_speed > 0.0:
-			var accel_speed := air_accel * air_max_speed * delta
-			accel_speed = min(accel_speed, add_speed)
-			velocity += wish_dir * accel_speed
 
 func apply_explosion_impulse(explosion_pos: Vector3, max_force: float, radius: float, upward_bias: float = 0.6) -> void:
 	var player_center := global_position + Vector3(0, 0.9, 0)
@@ -118,7 +134,7 @@ func apply_explosion_impulse(explosion_pos: Vector3, max_force: float, radius: f
 	if distance > radius:
 		return
 
-	var dir := delta_pos.normalized()
+	var dir := Vector3.UP if distance < 0.001 else delta_pos.normalized()
 	dir.y += upward_bias
 	dir = dir.normalized()
 
@@ -138,8 +154,9 @@ func start_prime_conc() -> void:
 	conc.init_primed(self)
 	active_primed_conc = conc
 
-func clear_primed_conc() -> void:
-	active_primed_conc = null
+func clear_primed_conc(conc: Node = null) -> void:
+	if conc == null or active_primed_conc == conc:
+		active_primed_conc = null
 
 func release_conc() -> void:
 	if active_primed_conc != null and is_instance_valid(active_primed_conc):
@@ -152,11 +169,27 @@ func fire_rocket() -> void:
 		return
 	var rocket = rocket_scene.instantiate()
 	get_tree().root.add_child(rocket)
+	var spawn_pos := projectile_spawn.global_position
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		spawn_pos,
+		1,
+		[get_rid()]
+	)
+	var hit := space_state.intersect_ray(query)
+	if not hit.is_empty():
+		spawn_pos = hit.position - (spawn_pos - camera.global_position).normalized() * 0.25
 	rocket.global_transform = projectile_spawn.global_transform
+	rocket.global_position = spawn_pos
 	rocket.launch(-camera.global_transform.basis.z, self)
 
 func respawn_at_checkpoint() -> void:
+	if active_primed_conc != null and is_instance_valid(active_primed_conc):
+		active_primed_conc.queue_free()
+	active_primed_conc = null
 	global_transform = spawn_checkpoint_transform
 	velocity = Vector3.ZERO
 	conc_inventory = max_concs
 	is_crouching = false
+	_apply_crouch_dimensions()
